@@ -668,9 +668,14 @@ def sort_junctions(libl, options):
     checkchrom = options.checkchrom
 
     if options.cluster == None:  # if not providing refined clusters externally
-        refined_cluster = (
-            f"{rundir}/clustering/{outPrefix}_clusters"  # note refined noisy intron clusters
-        )
+        if options.skipLow:
+            refined_cluster = (
+                f"{rundir}/clustering/{outPrefix}_refined"  # using refined clusters only
+            )
+        else:
+            refined_cluster = (
+                f"{rundir}/clustering/{outPrefix}_clusters"  # note refined noisy intron clusters
+            )
         logger.info(f"Using {refined_cluster} as refined cluster...")
     else:
         refined_cluster = options.cluster
@@ -1503,7 +1508,10 @@ def main(options, libl):
         if options.cluster == None:
             pool_junc_reads(libl, options)
             refine_clusters(options)
-            addlowusage(options)
+            if options.skipLow:
+                logger.info("Skipping low-usage junctions")
+            else:
+                addlowusage(options)
 
         sort_junctions(libl, options)
         merge_junctions(options)
@@ -1752,6 +1760,14 @@ if __name__ == "__main__":
         help="Logging level (default INFO)",
     )
 
+    parser.add_argument(
+            "--skip-low-usage",
+            dest='skipLow',
+            action="store_true",
+            default=False,
+            help="Disable adding back low-usage junctions to clusters",
+    )
+    
     parser.add_argument(
         "--no-auto-reformat-gtf",
         dest="no_auto_reformat",
