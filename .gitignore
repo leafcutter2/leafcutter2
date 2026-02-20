@@ -12,5 +12,6 @@ test*
 play*/
 **/*checkpoints/*
 **/*cache*/
+output
 
 
