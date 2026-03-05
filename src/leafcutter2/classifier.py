@@ -434,8 +434,8 @@ def check_utrs(junc,strand,start_codons,stop_codons):
         return True
     return False
 
-def solve_NMD(chrom, strand, junc, start_codons, stop_codons,gene_name, fa, 
-              verbose = False, exonLcutoff = 2000):
+def solve_NMD(chrom, strand, junc, start_codons, stop_codons, gene_name, fa,
+              verbose=False, exonLcutoff=2000, max_paths=100000, max_exon_search=100000):
     '''
     Compute whether there is a possible combination that uses the junction without
     inducing a PTC. We start with all annotated stop codon and go backwards.
@@ -465,12 +465,23 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons,gene_name, fa,
     dic_terminus = {}
 
     depth = 0
-    """Quinn Comment: while our seed length is greater than 0 - which means we have charted all possible paths through 
+    paths_explored = 0
+    truncated = False
+
+    """Quinn Comment: while our seed length is greater than 0 - which means we have charted all possible paths through
     all junctions ending in a stop codon (or there is an exon longer than 1000 bp and we have no complete paths)"""
     while len(seed) > 0:
         new_seed = []
         final_check = []
         depth += 1
+
+        # Check path limit to prevent memory blowup
+        paths_explored += len(seed)
+        if paths_explored > max_paths:
+            logger.warning(f"{gene_name} exceeded {max_paths} paths at depth {depth}, truncating search")
+            truncated = True
+            break
+
         if verbose:
             logger.debug(f"Depth {depth}, Seed L = {len(seed)}")
                     
@@ -548,7 +559,7 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons,gene_name, fa,
             next_exon_max = 0
 
             ptc_ahead = False
-            while ptc_ahead == False:
+            while ptc_ahead == False and next_exon_max < max_exon_search:
                 next_exon_max += 500
                 endpos = (len(leftover)+next_exon_max+1)%3
                 if strand == '+':
@@ -631,12 +642,26 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons,gene_name, fa,
                         junc_pass[j_coord] = 0
                     junc_pass[j_coord] += 1
 
+        # Limit new_seed size to prevent memory blowup in single iteration
+        if len(new_seed) > max_paths:
+            logger.warning(f"{gene_name} new_seed size ({len(new_seed)}) exceeds limit, keeping first {max_paths} paths")
+            new_seed = new_seed[:max_paths]
+            truncated = True
+
         seed = new_seed
     
     
     """Quinn Comment: OUT OF WHILE LOOP through all possible paths/seeds; 
     check all terminus' to see if they are part of a full path that has been classified as passing"""
+    terminus_iterations = 0
+    max_terminus_iterations = 50000
+
     while True:
+        terminus_iterations += 1
+        if terminus_iterations > max_terminus_iterations:
+            logger.warning(f"{gene_name} terminus checking exceeded {max_terminus_iterations} iterations, stopping")
+            break
+
         new_paths = []
         for terminus in dic_terminus:
             terminus_pass = False
@@ -704,10 +729,19 @@ def parse_gtf(gtf: str,
         }
 
         for standard_key, custom_attr in attribute_mapping.items():
-            try: 
+            try:
                 dic[standard_key] = info_fields[custom_attr]
             except KeyError:
                 dic[standard_key] = None
+
+        # Fallback: use gene_id if gene_name is missing (common in Ensembl GTFs)
+        if dic.get('gene_name') is None and 'gene_id' in info_fields:
+            dic['gene_name'] = info_fields['gene_id']
+
+        # Fallback: use transcript_id if transcript_name is missing
+        if dic.get('transcript_name') is None and 'transcript_id' in info_fields:
+            dic['transcript_name'] = info_fields['transcript_id']
+
         yield dic
          
 
@@ -862,12 +896,13 @@ def overlaps(A: tuple, B: tuple):
 
 
 def ClassifySpliceJunction(
-    perind_file: str, 
-    gtf_annot: str, 
+    perind_file: str,
+    gtf_annot: str,
     fa,
     rundir: str = ".",
     outprefix: str = "Leaf2",
     max_juncs: int = 10000,
+    max_paths: int = 100000,
     keepannot: bool = False,
     gene_type: str = "gene_type",
     transcript_type: str = "transcript_type",
@@ -1026,9 +1061,10 @@ def ClassifySpliceJunction(
         
         if len(junctions) <= max_juncs:
             try:
-                junc_pass, junc_fail = solve_NMD(chrom,strand,junctions, 
-                                                start_codons, stop_codons, 
-                                                gene_name, fa)
+                junc_pass, junc_fail = solve_NMD(chrom, strand, junctions,
+                                                start_codons, stop_codons,
+                                                gene_name, fa,
+                                                max_paths=max_paths)
                 junc_fail = set(junc_fail.keys())
                 junc_pass = set(junc_pass.keys())
             except:
