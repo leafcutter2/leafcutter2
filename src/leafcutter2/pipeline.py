@@ -1304,19 +1304,81 @@ def validate_gtf_requirements(gtf_file, options, CheckRequirementsEveryNLines=No
                 logger.error(f"  Suggestion: Your GTF may use non-standard attribute names\n")
                 raise SystemExit(1)
     
+    # For non-required attributes (anything other than gene_id/transcript_id), verify that
+    # the chosen attribute is actually populated in every record across the full GTF.
+    # gene_id and transcript_id are required by the GTF spec and can be trusted without a
+    # full scan. If any records are missing a non-required attribute, fall back to the safe
+    # required alternative and warn the user.
+    safe_defaults = {'gene_name': 'gene_id', 'transcript_name': 'transcript_id'}
+    attrs_to_check = {
+        opt: getattr(options, opt)
+        for opt in ('gene_name', 'transcript_name')
+        if getattr(options, opt) != safe_defaults[opt]
+    }
+
+    if attrs_to_check:
+        logger.info(
+            f"Performing full GTF scan to verify completeness of non-required attributes: "
+            f"{list(attrs_to_check.values())}\n"
+        )
+        null_counts = {opt: 0 for opt in attrs_to_check}
+        total_data_lines = 0
+        try:
+            opener = gzip.open if gtf_file.endswith('.gz') else open
+            with opener(gtf_file, 'rt') as fh:
+                for line in fh:
+                    if line.startswith('#') or not line.strip():
+                        continue
+                    fields = line.strip().split('\t')
+                    if len(fields) < 9:
+                        continue
+                    total_data_lines += 1
+                    attrs_str = fields[8]
+                    parsed = {}
+                    for attr_pair in attrs_str.split(';'):
+                        attr_pair = attr_pair.strip()
+                        if not attr_pair:
+                            continue
+                        if '"' in attr_pair:
+                            parts = attr_pair.split('"')
+                            if len(parts) >= 2:
+                                parsed[parts[0].strip()] = parts[1]
+                        else:
+                            parts = attr_pair.split(None, 1)
+                            if len(parts) == 2:
+                                parsed[parts[0]] = parts[1]
+                    for opt, attr in attrs_to_check.items():
+                        if not parsed.get(attr, '').strip():
+                            null_counts[opt] += 1
+        except Exception as e:
+            logger.warning(f"Could not verify attribute completeness: {e}\n")
+
+        for opt, attr in list(attrs_to_check.items()):
+            if null_counts[opt] > 0:
+                fallback = safe_defaults[opt]
+                logger.warning(
+                    f"Attribute '{attr}' missing or empty in {null_counts[opt]}/{total_data_lines} "
+                    f"GTF records; falling back to required attribute '{fallback}'\n"
+                )
+                setattr(options, opt, fallback)
+                if opt in auto_detected:
+                    auto_detected[opt] = fallback
+                elif opt in user_specified:
+                    user_specified[opt] = fallback
+
     # Print summary of what was used
     if user_specified:
         logger.info("Using user-specified GTF attributes:\n")
         for option_name, value in user_specified.items():
             logger.info(f"  {option_name}: {value}\n")
-            
+
     if auto_detected:
         logger.info("Auto-detected GTF attributes:\n")
         for option_name, value in auto_detected.items():
             logger.info(f"  {option_name}: {value} (auto-detected)\n")
-    
+
     logger.info("GTF validation and attribute detection complete.\n")
-    
+
     return options
 
 def has_cds_feature(gtf_file: str) -> bool:
