@@ -12,3 +12,5 @@ dependencies:
   - pickleshare=0.7.5
   - pyfastx=2.2.0
   - python=3.11.1
+  # bedparse 0.2.3 imports pkg_resources, which setuptools removed in 81.
+  - setuptools<81

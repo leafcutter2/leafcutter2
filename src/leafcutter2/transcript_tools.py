@@ -106,18 +106,27 @@ def run_bedparse_gtf2bed(gtf_file, *args, n=None):
     # Construct and run bedparse command
     command = ['bedparse', 'gtf2bed', gtf_input]
     command.extend(args)
-    result = subprocess.run(command, capture_output=True, text=True)
-
-    # Cleanup temp files
-    for p in cleanup_paths:
-        try:
-            os.unlink(p)
-        except Exception:
-            pass
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "Could not execute `bedparse`. It is a required dependency and must be "
+            "on PATH. Install it with `pip install bedparse` or "
+            "`conda install -c bioconda bedparse`."
+        ) from exc
+    finally:
+        # Cleanup temp files
+        for p in cleanup_paths:
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
 
     if result.returncode != 0:
-        logging.error(f"Error running bedparse gtf2bed: {result.stderr}")
-        return None
+        raise RuntimeError(
+            f"`{' '.join(command)}` failed with exit code {result.returncode}.\n"
+            f"bedparse stderr:\n{result.stderr}"
+        )
     return result.stdout
 
 def kozak_motif_from_counts(counts_dict=None, pseudocount=0.5):

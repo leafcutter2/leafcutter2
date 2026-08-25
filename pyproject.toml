@@ -33,6 +33,10 @@ dependencies = [
   "biopython",
   "pyfastx",
   "bedparse",
+  # bedparse 0.2.3 imports pkg_resources, which setuptools removed in 81, so
+  # `bedparse gtf2bed` (used by leafcutter2-transcript-tools on GTF input)
+  # fails on a fresh install without this constraint.
+  "setuptools<81",
   "argparse-dataclass",
 ]
 

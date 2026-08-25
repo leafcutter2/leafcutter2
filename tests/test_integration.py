@@ -258,3 +258,68 @@ def test_scenario4_minimal_gtf_no_cds(tmp_path):
         tmp_path / "leafcutter2.junction_counts.gz",
         REF_DIR / "test4/junction_counts.txt",
     )
+
+
+# ── leafcutter2-transcript-tools ─────────────────────────────────────────────
+#
+# The tests above only ever invoke transcript-tools via `--help`, which returns
+# before any input is read. Its GTF-input path shells out to `bedparse gtf2bed`,
+# so a broken or missing bedparse went unnoticed until it failed at runtime for
+# users -- see the setuptools<81 constraint on bedparse's pkg_resources import.
+
+def test_transcript_tools_gtf_to_bed12(tmp_path):
+    """transcript-tools converts the example GTF to bed12 (exercises bedparse)."""
+    out_bed = tmp_path / "transcripts.bed.gz"
+    result = subprocess.run(
+        [
+            "leafcutter2-transcript-tools",
+            "-i", str(ANNOTATION_GTF),
+            "-fa", str(ANNOTATION_FA),
+            "-bed12_out", str(out_bed),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"transcript-tools failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert out_bed.exists(), "no bed12 output was written"
+
+    lines = gzip.open(out_bed, "rt").read().splitlines()
+    assert lines, "bed12 output is empty"
+
+    header = lines[0].lstrip("#").split("\t")
+    for expected in ("chr", "start", "end", "name", "gene_id", "transcript_id",
+                     "transcript_type", "NMDFinderB"):
+        assert expected in header, f"missing column {expected!r} in {header}"
+
+    assert len(lines) > 1, "bed12 output has a header but no transcripts"
+    # Every record must have as many fields as the header.
+    for line in lines[1:]:
+        assert len(line.split("\t")) == len(header), (
+            f"field count mismatch:\n{line}"
+        )
+
+
+def test_transcript_tools_gtf_to_gtf(tmp_path):
+    """transcript-tools round-trips the example GTF to an annotated GTF."""
+    out_gtf = tmp_path / "annotated.gtf"
+    result = subprocess.run(
+        [
+            "leafcutter2-transcript-tools",
+            "-i", str(ANNOTATION_GTF),
+            "-fa", str(ANNOTATION_FA),
+            "-o", str(out_gtf),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"transcript-tools failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert out_gtf.exists() and out_gtf.stat().st_size > 0, "no GTF output was written"
+    assert any(
+        "\ttranscript\t" in line for line in out_gtf.read_text().splitlines()[:2000]
+    ), "output GTF has no transcript features"
