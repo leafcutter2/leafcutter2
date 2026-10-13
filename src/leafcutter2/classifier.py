@@ -571,7 +571,10 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons, gene_name, fa,
                 next_exon_max += 500
                 endpos = (len(leftover)+next_exon_max+1)%3
                 if strand == '+':
-                    seq = leftover + Seq(fa.fetch(chrom, (last_pos, last_pos+next_exon_max)))
+                    # keep the window inside the contig; pyfastx does not bounds-check
+                    chrom_len = len(fa[chrom])
+                    seq = leftover + Seq(fa.fetch(chrom, (max(1, min(last_pos, chrom_len)), max(1, min(last_pos+next_exon_max, chrom_len)))))
+                    endpos = len(seq) % 3  # from the fetched length, which is shorter than requested at a contig edge
                     if endpos == 0:
                         prot = seq.translate()
                         
@@ -579,7 +582,10 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons, gene_name, fa,
                         prot = seq[:-endpos].translate()
                                                                                                                                     
                 else:
-                    seq = Seq(fa.fetch(chrom, (last_pos-next_exon_max,last_pos)))+leftover
+                    # keep the window inside the contig; pyfastx does not bounds-check
+                    chrom_len = len(fa[chrom])
+                    seq = Seq(fa.fetch(chrom, (max(1, min(last_pos-next_exon_max, chrom_len)), max(1, min(last_pos, chrom_len)))))+leftover
+                    endpos = len(seq) % 3  # from the fetched length, which is shorter than requested at a contig edge
                     if endpos > 0:
                         seq = seq.reverse_complement()
                         prot = seq[:-endpos].translate()
